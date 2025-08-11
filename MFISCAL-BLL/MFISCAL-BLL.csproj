@@ -1,26 +1,26 @@
-<Project Sdk="Microsoft.NET.Sdk.Web">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
-    <Nullable>enable</Nullable>
+    <RootNamespace>MFISCAL_BLL</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
-    <RootNamespace>MFISCAL_API</RootNamespace>
+    <Nullable>enable</Nullable>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.2" />
+    <PackageReference Include="Microsoft.AspNetCore.Http.Abstractions" Version="2.3.0" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="9.0.8" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="9.0.8">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="9.0.4" />
-    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.13.1" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\MFISCAL-BLL\MFISCAL-BLL.csproj" />
     <ProjectReference Include="..\MFISCAL-DAL\MFISCAL-DAL.csproj" />
+	<ProjectReference Include="..\MFISCAL-INF\MFISCAL-INF.csproj" />
   </ItemGroup>
 
 </Project>
