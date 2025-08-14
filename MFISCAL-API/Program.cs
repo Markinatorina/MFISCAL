@@ -27,11 +27,13 @@ builder.Services.AddScoped<ServiceLogger>();
 builder.Services.AddScoped<AuthenticationService>();
 builder.Services.AddScoped<UserService>();
 builder.Services.AddScoped<SeedingService>();
+builder.Services.AddScoped<InvoiceService>();
 
 // Register repositories
 builder.Services.AddScoped<IIdentifiableRepository<UserDB>, IdentifiableRepository<UserDB>>();
 builder.Services.AddScoped<IIdentifiableRepository<LoginTokenDB>, IdentifiableRepository<LoginTokenDB>>();
 builder.Services.AddScoped<IIdentifiableRepository<InviteCodeDB>, IdentifiableRepository<InviteCodeDB>>();
+builder.Services.AddScoped<IIdentifiableRepository<InvoiceDB>, IdentifiableRepository<InvoiceDB>>();
 
 // Register HTTP context
 builder.Services.AddHttpContextAccessor();

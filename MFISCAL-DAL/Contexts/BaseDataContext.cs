@@ -22,5 +22,6 @@ namespace MFISCAL_DAL.Contexts
         public DbSet<UserDB> Users { get; set; }
         public DbSet<InviteCodeDB> InviteCodes { get; set; }
         public DbSet<LoginTokenDB> LoginTokens { get; set; }
+        public DbSet<InvoiceDB> Invoices { get; set; }
     }
 }
