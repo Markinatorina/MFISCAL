@@ -1,29 +1,35 @@
 ﻿using MFISCAL_INF.Models;
+using MFISCAL_INF.Utils;
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
-using System.Threading;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 
 namespace MFISCAL_INF.Environments
 {
-    /* 
-     * Get Fiscal Signing Certificates here:
-     * https://www.fina.hr/poslovni-digitalni-certifikati/poslovni-certifikati-za-fiskalizaciju
-     * https://www.fina.hr/poslovni-digitalni-certifikati/poslovni-certifikati-za-fiskalizaciju/izdavanje-demo-aplikacijskog-certifikata-za-fiskalizaciju
-     * 
+    /*
      * WINDOWS (Windows Credential Manager):
      * -----------------------------
      * # Store credentials from an elevated or normal PowerShell prompt:
-     * cmdkey /add:MFISCAL_PG_BASEDB_PASSWORD /user:ignore /pass:YourPostgresPassword
-     * cmdkey /add:MFISCAL_SIGNINGCERT_PASSWORD /user:ignore /pass:YourFiscalSigningCertPassword
-     * cmdkey /add:MFISCAL_CLIENTCERT_PASSWORD /user:ignore /pass:YourFiscalClientCertPassword
-     * 
-     * On Windows you can read the secrets by going to: 
-     * Control Panel -> User Accounts -> Manage your credentials (left side) -> Windows Credentials
-     * 
+     * # Production (required)
+     * cmdkey /generic:MFISCAL_PG_BASEDB_USER /user:YourPostgresUser /pass:ignore
+     * cmdkey /generic:MFISCAL_PG_BASEDB_PASSWORD /user:ignore /pass:YourPostgresPassword
+     * cmdkey /generic:MFISCAL_SIGNINGCERT_PASSWORD /user:ignore /pass:YourFiscalSigningCertPassword
+     * cmdkey /generic:MFISCAL_CLIENTCERT_PASSWORD /user:ignore /pass:YourFiscalClientCertPassword
+     *
+     * # Development-only credentials (use only in Development environment)
+     * # Prefix with DEV_ to avoid accidental use in production:
+     * cmdkey /generic:DEV_MFISCAL_PG_BASEDB_USER /user:DevPostgresUser /pass:ignore
+     * cmdkey /generic:DEV_MFISCAL_PG_BASEDB_PASSWORD /user:ignore /pass:DevPostgresPassword
+     * cmdkey /generic:DEV_MFISCAL_SIGNINGCERT_PASSWORD /user:ignore /pass:DevSigningCertPassword
+     * cmdkey /generic:DEV_MFISCAL_CLIENTCERT_PASSWORD /user:ignore /pass:DevClientCertPassword
+     *
+     * On Windows you can inspect stored credentials at:
+     * Control Panel -> User Accounts -> Manage your credentials -> Windows Credentials
+     *
      * LINUX (pass - Password Store):
      * ------------------------------
      * sudo apt update && sudo apt install -y pass gnupg2
@@ -31,12 +37,22 @@ namespace MFISCAL_INF.Environments
      * gpg --full-generate-key
      * # initialize pass with your GPG identity (example: "you@example.com")
      * pass init "you@example.com"
-     * # insert secrets:
+     *
+     * # Production (required)
+     * pass insert MFISCAL_PG_BASEDB_USER       # first non-empty line = username
      * pass insert MFISCAL_PG_BASEDB_PASSWORD
      * pass insert MFISCAL_SIGNINGCERT_PASSWORD
      * pass insert MFISCAL_CLIENTCERT_PASSWORD
-     * 
-     * On Linux call `pass show <name>` to read the secret.
+     *
+     * # Development-only credentials (use only in Development environment)
+     * pass insert DEV_MFISCAL_PG_BASEDB_USER
+     * pass insert DEV_MFISCAL_PG_BASEDB_PASSWORD
+     * pass insert DEV_MFISCAL_SIGNINGCERT_PASSWORD
+     * pass insert DEV_MFISCAL_CLIENTCERT_PASSWORD
+     *
+     * # To read a secret:
+     * pass show MFISCAL_PG_BASEDB_USER
+     * pass show DEV_MFISCAL_PG_BASEDB_USER
      */
 
     public class LocalEnvironment : ILocalEnvironment
@@ -58,36 +74,91 @@ namespace MFISCAL_INF.Environments
                 JwtIssuerAudience = GetRequiredValue("jwt_issuer_audience"),
                 AdminUsername = GetRequiredValue("admin_username"),
                 AdminPassword = GetRequiredValue("admin_password"),
-                PostgresBaseDbUser = GetRequiredValue("postgres_basedb_user"),
-                PostgresBaseDbPassword = GetSecurePassword("MFISCAL_PG_BASEDB_PASSWORD"),
+                PostgresBaseDbUser = GetSecureUsername(ResolveCredentialKey("MFISCAL_PG_BASEDB_USER")),
+                PostgresBaseDbPassword = GetSecureSecret(ResolveCredentialKey("MFISCAL_PG_BASEDB_PASSWORD")),
                 PostgresBaseDbHost = GetRequiredValue("postgres_basedb_host"),
                 PostgresBaseDbPort = ParseRequiredInt("postgres_basedb_port"),
                 PostgresBaseDbDbName = GetRequiredValue("postgres_basedb_dbname"),
                 PostgresBaseDbSslMode = GetRequiredValue("postgres_basedb_ssl_mode"),
                 FiscalSigningCertPath = GetRequiredValue("fiscal_signingcert_path"),
-                FiscalSigningCertPassword = GetSecurePassword("MFISCAL_SIGNINGCERT_PASSWORD"),
-                FiscalSigningCertThumbprint = GetRequiredValue("fiscal_signingcert_thumbprint"),
+                FiscalSigningCertPassword = GetSecureSecret(ResolveCredentialKey("MFISCAL_SIGNINGCERT_PASSWORD")),
+                FiscalSigningCertThumbprint = GetFiscalSigningCertThumbprint(),
                 FiscalClientCertPath = GetRequiredValue("fiscal_clientcert_path"),
-                FiscalClientCertPassword = GetSecurePassword("MFISCAL_CLIENTCERT_PASSWORD"),
+                FiscalClientCertPassword = GetSecureSecret(ResolveCredentialKey("MFISCAL_CLIENTCERT_PASSWORD")),
                 FiscalEduEndpoint = GetRequiredValue("fiscal_eduendpoint"),
                 FiscalAuditFolder = GetRequiredValue("fiscal_auditfolder")
             };
         }
 
-        private string GetRequiredValue(string key)
+        private string? GetFiscalSigningCertThumbprint()
         {
-            if (_values.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value))
-                return value;
-            throw new InvalidOperationException($"Required environment variable '{key}' is missing or empty in {EnvFileName}");
+            string signingCertPath = GetRequiredValue("fiscal_signingcert_path");
+            string? signingCertPassword = GetSecureSecret(ResolveCredentialKey("MFISCAL_SIGNINGCERT_PASSWORD"));
+            if (string.IsNullOrWhiteSpace(signingCertPath) || !File.Exists(signingCertPath))
+                return null;
+            var ext = Path.GetExtension(signingCertPath).ToLowerInvariant();
+            if (ext == ".p12" || ext == ".pfx")
+            {
+                return EnvironmentUtils.ComputeSha1ThumbprintFromPfx(signingCertPath, signingCertPassword);
+            }
+            if (ext == ".cer" || ext == ".pem" || ext == ".crt")
+            {
+                return EnvironmentUtils.ComputeSha1ThumbprintFromPemOrDer(signingCertPath);
+            }
+            return null;
         }
 
-        private string GetSecurePassword(string credentialKey)
+        private static string ResolveCredentialKey(string baseKey)
+        {
+            if (IsDevelopment())
+            {
+                if (baseKey.StartsWith("DEV_", StringComparison.OrdinalIgnoreCase))
+                    return baseKey;
+                return "DEV_" + baseKey;
+            }
+            return baseKey;
+        }
+
+        private string GetSecureUsername(string credentialKey)
         {
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
                 try
                 {
-                    return WindowsCredentialManager.ReadCredential(credentialKey);
+                    var u = WindowsCredentialsUtils.ReadCredentialUsername(credentialKey);
+                    if (!string.IsNullOrWhiteSpace(u)) return u;
+                    throw new InvalidOperationException($"Windows credential '{credentialKey}' exists but contains empty username. Ensure UserName is set for the credential.");
+                }
+                catch (Exception ex)
+                {
+                    throw new InvalidOperationException($"Failed to read Windows credential username '{credentialKey}': {ex.Message}", ex);
+                }
+            }
+
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+            {
+                var output = LinuxCredentialsUtils.RunPassShow(credentialKey);
+                if (string.IsNullOrWhiteSpace(output))
+                    throw new InvalidOperationException($"pass returned empty output for key '{credentialKey}'. Ensure the secret exists and contains the username on the first non-empty line.");
+
+                var firstLine = EnvironmentUtils.GetFirstNonEmptyLine(output);
+                if (string.IsNullOrWhiteSpace(firstLine))
+                    throw new InvalidOperationException($"pass returned only empty lines for key '{credentialKey}'. Ensure the secret contains a non-empty username.");
+                return firstLine;
+            }
+
+            throw new PlatformNotSupportedException("Secure username retrieval is only supported on Windows and Linux.");
+        }
+
+        private string GetSecureSecret(string credentialKey)
+        {
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                try
+                {
+                    var p = WindowsCredentialsUtils.ReadCredential(credentialKey);
+                    if (!string.IsNullOrWhiteSpace(p)) return p;
+                    throw new InvalidOperationException($"Windows credential '{credentialKey}' exists but returned an empty secret.");
                 }
                 catch (Exception ex)
                 {
@@ -97,46 +168,24 @@ namespace MFISCAL_INF.Environments
 
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
             {
-                var psi = new ProcessStartInfo
-                {
-                    FileName = "pass",
-                    Arguments = $"show {credentialKey}",
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
+                var output = LinuxCredentialsUtils.RunPassShow(credentialKey);
+                if (string.IsNullOrWhiteSpace(output))
+                    throw new InvalidOperationException($"pass returned empty output for key '{credentialKey}'. Ensure the secret exists and contains the secret on the first non-empty line.");
 
-                using var process = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start 'pass' process. Is 'pass' installed and initialized?");
-                var sbOut = new StringBuilder();
-                var sbErr = new StringBuilder();
-
-                var outReader = process.StandardOutput;
-                var errReader = process.StandardError;
-
-                var readTask = outReader.ReadToEndAsync();
-                var errTask = errReader.ReadToEndAsync();
-
-                if (!process.WaitForExit(5000))
-                {
-                    try { process.Kill(); } catch { }
-                    throw new InvalidOperationException($"Timeout when reading secret '{credentialKey}' from pass.");
-                }
-
-                var output = readTask.Result.Trim();
-                var err = errTask.Result.Trim();
-
-                if (process.ExitCode != 0)
-                    throw new InvalidOperationException($"pass returned exit code {process.ExitCode} for key '{credentialKey}'. stderr: {err}");
-
-                if (string.IsNullOrEmpty(output))
-                    throw new InvalidOperationException($"pass returned empty output for key '{credentialKey}'.");
-
-                var firstLine = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)[0];
+                var firstLine = EnvironmentUtils.GetFirstNonEmptyLine(output);
+                if (string.IsNullOrWhiteSpace(firstLine))
+                    throw new InvalidOperationException($"pass returned only empty lines for key '{credentialKey}'. Ensure the secret contains a non-empty secret.");
                 return firstLine;
             }
 
-            throw new PlatformNotSupportedException("Secure password retrieval is only supported on Windows and Linux.");
+            throw new PlatformNotSupportedException("Secure secret retrieval is only supported on Windows and Linux.");
+        }
+
+        private string GetRequiredValue(string key)
+        {
+            if (_values.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value))
+                return value;
+            throw new InvalidOperationException($"Required environment variable '{key}' is missing or empty in {EnvFileName}");
         }
 
         private int ParseRequiredInt(string key)
@@ -180,75 +229,6 @@ namespace MFISCAL_INF.Environments
             if (string.IsNullOrWhiteSpace(key))
                 throw new InvalidOperationException($"'jwt_issuer_signing_key' is missing or empty in {EnvFileName}");
             return Encoding.UTF8.GetBytes(key);
-        }
-    }
-
-    internal static class WindowsCredentialManager
-    {
-        private const string AdvApi = "advapi32.dll";
-
-        [DllImport(AdvApi, CharSet = CharSet.Unicode, SetLastError = true)]
-        private static extern bool CredRead(string target, CredentialType type, int reservedFlag, out IntPtr credentialPtr);
-
-        [DllImport(AdvApi, SetLastError = true)]
-        private static extern void CredFree(IntPtr buffer);
-
-        private enum CredentialType : int
-        {
-            Generic = 1,
-        }
-
-        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-        private struct CREDENTIAL
-        {
-            public uint Flags;
-            public uint Type;
-            public IntPtr TargetName;
-            public IntPtr Comment;
-            public System.Runtime.InteropServices.ComTypes.FILETIME LastWritten;
-            public uint CredentialBlobSize;
-            public IntPtr CredentialBlob;
-            public uint Persist;
-            public uint AttributeCount;
-            public IntPtr Attributes;
-            public IntPtr TargetAlias;
-            public IntPtr UserName;
-        }
-
-        public static string ReadCredential(string target)
-        {
-            if (string.IsNullOrEmpty(target)) throw new ArgumentNullException(nameof(target));
-
-            if (!CredRead(target, CredentialType.Generic, 0, out var credPtr))
-            {
-                var err = Marshal.GetLastWin32Error();
-                throw new InvalidOperationException($"CredRead failed for '{target}' (Win32 error {err}). Make sure the credential exists (cmdkey /list).");
-            }
-
-            try
-            {
-                var cred = Marshal.PtrToStructure<CREDENTIAL>(credPtr);
-
-                if (cred.CredentialBlobSize == 0 || cred.CredentialBlob == IntPtr.Zero)
-                    return string.Empty;
-
-                var blobSize = (int)cred.CredentialBlobSize;
-                var blob = new byte[blobSize];
-                Marshal.Copy(cred.CredentialBlob, blob, 0, blobSize);
-
-                try
-                {
-                    return Encoding.Unicode.GetString(blob).TrimEnd('\0');
-                }
-                catch
-                {
-                    return Encoding.UTF8.GetString(blob).TrimEnd('\0');
-                }
-            }
-            finally
-            {
-                CredFree(credPtr);
-            }
         }
     }
 }

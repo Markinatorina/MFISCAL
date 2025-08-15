@@ -19,8 +19,6 @@ namespace MFISCAL_INF.Models
         public required int PostgresBaseDbPort { get; init; }
         public required string PostgresBaseDbDbName { get; init; }
         public required string PostgresBaseDbSslMode { get; init; }
-
-        // Fiscalisation properties
         public string? FiscalSigningCertPath { get; init; }
         public string? FiscalSigningCertPassword { get; init; }
         public string? FiscalSigningCertThumbprint { get; init; }
