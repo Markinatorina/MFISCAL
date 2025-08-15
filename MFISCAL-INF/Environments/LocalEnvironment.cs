@@ -90,22 +90,29 @@ namespace MFISCAL_INF.Environments
             };
         }
 
-        private string? GetFiscalSigningCertThumbprint()
+        private string GetFiscalSigningCertThumbprint()
         {
             string signingCertPath = GetRequiredValue("fiscal_signingcert_path");
-            string? signingCertPassword = GetSecureSecret(ResolveCredentialKey("MFISCAL_SIGNINGCERT_PASSWORD"));
+            string signingCertPassword = GetSecureSecret(ResolveCredentialKey("MFISCAL_SIGNINGCERT_PASSWORD"));
             if (string.IsNullOrWhiteSpace(signingCertPath) || !File.Exists(signingCertPath))
-                return null;
+                throw new InvalidOperationException($"Fiscal signing certificate path '{signingCertPath}' is missing or the file does not exist.");
             var ext = Path.GetExtension(signingCertPath).ToLowerInvariant();
+            string? thumbprint = null;
             if (ext == ".p12" || ext == ".pfx")
             {
-                return EnvironmentUtils.ComputeSha1ThumbprintFromPfx(signingCertPath, signingCertPassword);
+                thumbprint = EnvironmentUtils.ComputeSha1ThumbprintFromPfx(signingCertPath, signingCertPassword);
             }
-            if (ext == ".cer" || ext == ".pem" || ext == ".crt")
+            else if (ext == ".cer" || ext == ".pem" || ext == ".crt")
             {
-                return EnvironmentUtils.ComputeSha1ThumbprintFromPemOrDer(signingCertPath);
+                thumbprint = EnvironmentUtils.ComputeSha1ThumbprintFromPemOrDer(signingCertPath);
             }
-            return null;
+            else
+            {
+                throw new InvalidOperationException($"Unsupported certificate file extension '{ext}' for fiscal signing certificate.");
+            }
+            if (string.IsNullOrWhiteSpace(thumbprint))
+                throw new InvalidOperationException($"Fiscal signing certificate thumbprint could not be determined from file '{signingCertPath}'. Ensure the certificate file is valid.");
+            return thumbprint;
         }
 
         private static string ResolveCredentialKey(string baseKey)

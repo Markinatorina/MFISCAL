@@ -19,12 +19,12 @@ namespace MFISCAL_INF.Models
         public required int PostgresBaseDbPort { get; init; }
         public required string PostgresBaseDbDbName { get; init; }
         public required string PostgresBaseDbSslMode { get; init; }
-        public string? FiscalSigningCertPath { get; init; }
-        public string? FiscalSigningCertPassword { get; init; }
-        public string? FiscalSigningCertThumbprint { get; init; }
-        public string? FiscalClientCertPath { get; init; }
-        public string? FiscalClientCertPassword { get; init; }
-        public string? FiscalEduEndpoint { get; init; }
-        public string? FiscalAuditFolder { get; init; }
+        public required string FiscalSigningCertPath { get; init; }
+        public required string FiscalSigningCertPassword { get; init; }
+        public required string FiscalSigningCertThumbprint { get; init; }
+        public required string FiscalClientCertPath { get; init; }
+        public required string FiscalClientCertPassword { get; init; }
+        public required string FiscalEduEndpoint { get; init; }
+        public required string FiscalAuditFolder { get; init; }
     }
 }
